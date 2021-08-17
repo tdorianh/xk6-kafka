@@ -6,51 +6,33 @@ import (
 	"time"
 
 	kafkago "github.com/segmentio/kafka-go"
-	"github.com/segmentio/kafka-go/compress"
 	"go.k6.io/k6/lib"
 	"go.k6.io/k6/stats"
 )
 
 var (
-	CompressionCodecs = map[string]compress.Codec{
-		"Gzip":   &compress.GzipCodec,
-		"Snappy": &compress.SnappyCodec,
-		"Lz4":    &compress.Lz4Codec,
-		"Zstd":   &compress.ZstdCodec,
+	CompressionCodecs = map[string]kafkago.Compression{
+		"Gzip":   kafkago.Gzip,
+		"Snappy": kafkago.Snappy,
+		"Lz4":    kafkago.Lz4,
+		"Zstd":   kafkago.Zstd,
 	}
 )
 
-func (*Kafka) Writer(brokers []string, topic string, auth string, compression string) *kafkago.Writer {
-	var dialer *kafkago.Dialer
-
-	if auth != "" {
-		creds, err := unmarshalCredentials(auth)
-		if err != nil {
-			ReportError(err, "Unable to unmarshal credentials")
-			return nil
-		}
-
-		dialer = getDialer(creds)
-		if dialer == nil {
-			ReportError(nil, "Dialer cannot authenticate")
-			return nil
-		}
+func (*Kafka) Writer(brokers []string, topic string, compression string, batchSize int, batchBytes int, batchTimeout int, requiredAcks int, async bool) *kafkago.Writer {
+	writer := &kafkago.Writer{
+		Addr:         kafkago.TCP(brokers...),
+		Topic:        topic,
+		Compression:  CompressionCodecs[compression],
+		Balancer:     &kafkago.LeastBytes{},
+		RequiredAcks: kafkago.RequiredAcks(requiredAcks),
+		BatchBytes:   int64(batchBytes),
+		BatchSize:    batchSize,
+		BatchTimeout: time.Duration(batchTimeout) * time.Second,
+		Async:        async,
 	}
 
-	writerConfig := kafkago.WriterConfig{
-		Brokers:   brokers,
-		Topic:     topic,
-		Balancer:  &kafkago.LeastBytes{},
-		BatchSize: 1,
-		Dialer:    dialer,
-		Async:     false,
-	}
-
-	if codec, exists := CompressionCodecs[compression]; exists {
-		writerConfig.CompressionCodec = codec
-	}
-
-	return kafkago.NewWriter(writerConfig)
+	return writer
 }
 
 func (*Kafka) Produce(
